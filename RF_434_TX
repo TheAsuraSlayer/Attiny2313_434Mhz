@@ -1,0 +1,98 @@
+/*
+ * RF_434.c
+ *
+ * Created: 17-01-2014 17:32:30
+ *  Author: Abhinav
+ */ 
+
+
+#include <avr/io.h>
+#include <util/delay.h>
+
+#define LedPin PIND6
+#define ButPin PIND3
+#define EchoPin PINB1
+#define TrigPin PINB0
+
+#define SYNC 0xAA
+#define RADDR 0x44
+#define LEDON 0x11
+#define LEDOFF 0x22
+
+uint8_t watchDogCount = 0;
+void USART_INIT(unsigned int baud)
+{
+	//Set Baud Rate
+	UBRRH = (unsigned char)(baud<<8);
+	UBRRL = (unsigned char)(baud);
+	//ENable RX and TX
+	UCSRB = (1<<RXEN) | (1<<TXEN);
+	UCSRC = (1<<UCSZ1) | (1<<UCSZ0);	// asynchronous,no parity,1 stop bit, 8 bit size
+}
+void USART_TRANSMIT(uint8_t value)
+{
+	while(!(UCSRA & (1<<UDRE))); //Wait if transmitting
+	UDR = value;
+}
+void sendPacket(uint8_t cmd)
+{
+	USART_TRANSMIT(SYNC);
+	USART_TRANSMIT(RADDR);
+	USART_TRANSMIT(cmd);
+	USART_TRANSMIT((RADDR+cmd));
+}
+uint8_t getReading()
+{
+	//Function which returns ONE Reading
+	PORTB &= ~(1<<TrigPin);							//Make TrigPin Low
+	_delay_us(20);									//Wait 20us
+	PORTB |= (1<<TrigPin);							//Make TrigPin High
+	_delay_us(12);									//Wait 12us
+	PORTB &= ~(1<<TrigPin);							//Make TrigPin Low
+	_delay_us(20);									//Wait 20us
+	
+	
+	while(!(PINB & (1<<PB1)))						//Wait for Input on ECHO PIN
+	{
+		continue;
+	}
+	TCCR1B = (1<<CS11);								//Input found----> Start Timer at prescale 1/8
+	while((PINB & (1<<PB1)))
+	{
+		continue;									//Wait for Input to stop on EchoPin
+	}
+	int counterValue = TCNT1;						//Copy TCNT1 value
+	TCCR1B = 0x00;									//Input Stopped----> Stop Timer
+	TCNT1 = 0;										//Reset TCNT1
+	
+	int dist = (counterValue/58);					//Calculate Distance
+	return dist;									//Return Distance
+}
+
+
+int main(void)
+{
+	USART_INIT(416);	//1200 bitrate
+	DDRD |= (1<<LedPin);	//LedPin as Output
+	DDRB |= (1<<TrigPin);						//Set TrigPin PB0 as Output
+	DDRB &= ~(1<<EchoPin);						//Set EchoPin PB1 as Input
+	PORTD |= (1<<ButPin);	//Internal Pull up on ButPin
+	
+	
+    while(1)
+    {
+        //TODO:: Please write your application code
+		if((PIND & (1<<ButPin)) == 0)
+		{
+			//BUTTON PRESSED
+			PORTD |= (1<<LedPin);
+			uint8_t value = getReading();
+			sendPacket(value);
+		}
+		else
+		{
+			PORTD &= ~(1<<LedPin);
+			sendPacket(LEDOFF);
+		}
+    }
+}
